@@ -1,0 +1,956 @@
+%% LyX 2.3.6.1 created this file.  For more info, see http://www.lyx.org/.
+%% Do not edit unless you really know what you are doing.
+\documentclass[10pt,twocolumn,ngerman,english]{article}
+\usepackage{mathpazo}
+\usepackage[scaled=0.95]{helvet}
+\usepackage{courier}
+\usepackage[T1]{fontenc}
+\usepackage[latin9]{inputenc}
+\usepackage{geometry}
+\geometry{verbose,tmargin=2cm,bmargin=2cm,lmargin=2cm,rmargin=2cm}
+\usepackage{array}
+\usepackage{float}
+\usepackage{calc}
+\usepackage{url}
+\usepackage{multirow}
+\usepackage{amsmath}
+\usepackage{amsthm}
+\usepackage{amssymb}
+\usepackage{graphicx}
+
+\makeatletter
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%% LyX specific LaTeX commands.
+%% Because html converters don't know tabularnewline
+\providecommand{\tabularnewline}{\\}
+\floatstyle{ruled}
+\newfloat{algorithm}{tbp}{loa}
+\providecommand{\algorithmname}{Algorithm}
+\floatname{algorithm}{\protect\algorithmname}
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%% Textclass specific LaTeX commands.
+\theoremstyle{plain}
+\newtheorem{thm}{\protect\theoremname}
+\theoremstyle{remark}
+\newtheorem{rem}[thm]{\protect\remarkname}
+\theoremstyle{definition}
+\newtheorem{defn}[thm]{\protect\definitionname}
+\theoremstyle{plain}
+\newtheorem{prop}[thm]{\protect\propositionname}
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%% User specified LaTeX commands.
+\DeclareMathOperator{\argmin}{argmin}
+\DeclareMathOperator{\prox}{prox}
+
+\makeatother
+
+\usepackage{babel}
+\addto\captionsenglish{\renewcommand{\definitionname}{Definition}}
+\addto\captionsenglish{\renewcommand{\propositionname}{Proposition}}
+\addto\captionsenglish{\renewcommand{\remarkname}{Remark}}
+\addto\captionsenglish{\renewcommand{\theoremname}{Theorem}}
+\addto\captionsngerman{\renewcommand{\algorithmname}{Algorithmus}}
+\addto\captionsngerman{\renewcommand{\definitionname}{Definition}}
+\addto\captionsngerman{\renewcommand{\propositionname}{Satz}}
+\addto\captionsngerman{\renewcommand{\remarkname}{Bemerkung}}
+\addto\captionsngerman{\renewcommand{\theoremname}{Theorem}}
+\providecommand{\definitionname}{Definition}
+\providecommand{\propositionname}{Proposition}
+\providecommand{\remarkname}{Remark}
+\providecommand{\theoremname}{Theorem}
+
+\begin{document}
+\title{Total Variation Restoration of Spatially Variant Blur}
+\author{Additional Project for ``Mathematical Image Processing'', SS 2021\\[0.5cm]Ferdinand
+Vanmaele\\
+\foreignlanguage{ngerman}{ }\texttt{\small{}Vanmaele@stud.uni-heidelberg.de}{\small{} }}
+\maketitle
+\begin{abstract}
+In this project we try to deblur images where the blur is spatially
+variant - that is, depending on the position of the image - and do
+so in a computationally effective way. In the lecture, image deblurring
+was formulated as a convex optimization problem, and discretized with
+the \emph{discrete convolution}, a linear operator $A$. If the blur
+is spatially \emph{invariant}, the discrete convolution $A$ is represented
+by a Toeplitz or block circulant matrix, and we can use the Discrete
+Fourier Transform (DFT) for efficient matrix operations. If the blur
+is spatially \emph{variant}, $A$ is non-Toeplitz in general.
+
+In the papers \cite{Yun-2017,Afonso-2011}, the authors focus on the
+\emph{alternate direction method of multipliers} (ADMM) to solve this
+problem. To reduce the problem size, the paper \cite{Yun-2017} finds
+an approximate solution in a low-dimensional \emph{Krylov subspace.}
+We verify their implementation and introduce the necessary theoretical
+background. 
+\end{abstract}
+
+\section{Motivation and Overview\label{sec:Motivation-and-Overview}}
+
+In image deblurring, we seek to recover the original, sharp image
+by using a mathematical model of the blurring process. This process
+is assumed to be \emph{linear}: if $f_{1}$ and $f_{2}$ are the blurred
+versions of the exact images $u_{1}$ and $u_{2}$, then $f=\alpha f_{1}+\beta f_{2}$
+is the blurred image of $u=\alpha u_{1}+\beta u_{2}$. Linear models
+can describe several physical mechanisms such as relative motion between
+the camera and subject (motion blur), bad focusing (defocusing blur),
+or a number of other mechanisms \cite{Afonso-2011}.
+
+The continous image acquisition model is, in particular, given by
+the integral: \cite{Nagy-1998}
+\begin{equation}
+f(s)=\int_{\mathbb{R}^{2}}p(s,t)u(t)\,\text{d}t,\quad s\in Q\label{eq:continuous-model-1}
+\end{equation}
+where $p$ describes the PSF (\emph{point-spread function}), $u$
+the exact image, $f$ the observed (blurred) image, and $Q\subset\mathbb{R}^{2}$
+the \emph{field of view}. In the usual applications in astronomy,
+microscopy and photographic imaging, the PSF has finite width \cite{Calvetti-2005},
+i.e. 
+\[
+p(s,t)\approx0\quad\text{for}\quad\|s-t\|>\delta,\ \delta>0.
+\]
+Thus, we can restrict the integral to the \emph{extended field of
+view} $B=Q+D_{\delta}$, where $D_{\delta}$ denotes a disc of radius
+$\delta$ centered at the origin. (Compare Figure \ref{fig:The-PSF-spills})
+ We now divide $B$ into $n_{B}$ identical pixels of area $h$ (assumed
+$\equiv1$), with $n$ pixels inside the field of view:
+\begin{equation}
+f(s_{l})=\sum_{k=1}^{n_{B}}p(s_{l},t_{k})u(t_{k}),\qquad1\leq l\leq n\label{eq:discrete-model-1}
+\end{equation}
+We limit ourselves to estimating the image $u$ from the data within
+the field of view $Q$. The observed image contains no information
+of the true scenery outside of $Q$. We thus use one of the following
+(artificial) boundary conditions: \cite[4.1 Basic Structures]{Hansen-2006}
+
+\begin{itemize}
+\item The \textbf{zero boundary condition} is a good choice when the exact
+image is mostly zero outside the boundary\textemdash as is the case
+for many astronomical images with a black background. Unfortunately,
+the zero boundary condition has a bad effect on reconstructions of
+images that are nonzero outside the border.
+\item The \textbf{periodic boundary condition} is frequently used in image
+processing. This implies that the image repeats itself (endlessly)
+in all directions.
+\item In some applications it is reasonable to use a \textbf{reflexive boundary
+condition}, which implies that the scene outside the image boundaries
+is a mirror image of the scene inside the image boundaries.
+\end{itemize}
+\begin{rem}
+When the blur introduced by the image acquisition process is \emph{spatially
+invariant}, the PSF $p$ does not depend on the spatial location $s$,
+and can be specified by:
+\begin{equation}
+p(s,t)=p(s-t)\label{eq:psf-invariant}
+\end{equation}
+and the sum becomes the two-dimensional convolution operation \cite[4.1]{Yun-2017}.
+\end{rem}
+
+\begin{rem}
+In this project we assume the point-spread function is a \emph{known
+}quantity, for example by deriving experimentally from point sources
+(such as fluorescent beads in microscopy \cite{Stuurman-2012}). If
+the blurring model is not known, or not with sufficient accuracy,
+we speak of \emph{blind deblurring} \cite{Almeida-2010}.
+\end{rem}
+
+
+\subsection{Matrix formulation\label{subsec:Matrix-formulation}}
+
+We can arrange the elements of the images $f$ and $u$ into column
+vectors\emph{ $\text{vec}(f)$} and $\text{vec}(u)$, by stacking
+an $M\times N$ image into an $n=MN$ vector. The equation (\ref{eq:discrete-model-1})
+can then be written as a linear system:
+\begin{equation}
+\text{vec}(f)=A\,\text{vec}(u).\label{eq:discrete-model-2}
+\end{equation}
+For images of sizes $M\times N$, the sizes of vectors are $MN\times1$,
+and the size of the matrix $A$ is $MN\times MN$. The construction
+of this matrix is described in detail in \cite[4. Structured Matrix Computations]{Hansen-2006}.
+
+ If $p$ describes spatially invariant blur, the matrix $A$ has
+a specific structure depending on the boundary conditions described
+above. In particular, $A$ is \emph{BCCB} (block circulant with circulant
+blocks) for periodic boundary conditions, and \emph{Toeplitz-plus-Hankel}
+for reflexive boundary conditions. Matrix computations can then be
+implemented efficiently with the Discrete Fourier transform (DFT)
+and Discrete Cosine Transform (DCT), respectively \cite[4.2.2, 4.3]{Hansen-2006}. 
+
+With \emph{spatially variant} blur, this is no longer the case. In
+this case, there is not a single PSF that can be used to represent
+the blurring operation; point sources in different locations of the
+image may result in different PSFs. In the most general case, there
+is a different PSF for each pixel in the image. Here we consider situations
+where there is a continuous and smooth variation in the PSF with respect
+to the position of the point source.
+
+\begin{figure}[b]
+\begin{centering}
+\includegraphics[width=0.6\columnwidth]{psf_image_boundary}
+\par\end{centering}
+\caption{The PSF ``spills over the edge'' at the image boundary (line), so
+that the scene values outside the image affect what is recorded. \label{fig:The-PSF-spills}}
+\end{figure}
+
+
+\section{Problem Solving Approach\label{sec:Problem-Solving-Approach}}
+
+For most scenarios of practical interest, the matrix $A$ formulated
+in \ref{subsec:Matrix-formulation} has a very high condition number,
+with singular values decaying to, and clustering at 0 \cite[1.4]{Hansen-2006}.
+This leads to the following problems:
+\begin{enumerate}
+\item For the system $Ax=f$, noise in the data term $f$ is amplified by
+the inversion of very small singular values of $A$ (Figure \ref{fig:noise-inverse-filtering}). 
+\item Small perturbations in the matrix $A$ (e.g. from differences between
+the estimated and true PSF) may lead to poor deblurring results.
+\end{enumerate}
+\begin{figure}[h]
+\begin{centering}
+\includegraphics[width=0.8\columnwidth]{inverse_filtering}
+\par\end{centering}
+\caption{(a) Original image; (b) noise-free image, corrupted by linear motion
+blur; (c) solution obtained by inverse filtering in the noise-free
+case; (d) solution obtained by inverse filtering in the noisy case
+(white Gaussian noise added to the image in (b))\label{fig:noise-inverse-filtering}
+}
+\end{figure}
+
+In this project, we approach the first issue by adding \emph{regularizers},
+in a constrained optimization problem of the form:
+\begin{equation}
+\min_{u\in\mathbb{R}^{n}}\phi(u)\quad\text{subject to}\quad\|Au-f\|_{2}\leq\varepsilon\label{eq:constrained-1}
+\end{equation}
+where $\phi:\mathbb{R}^{n}\rightarrow\overline{\mathbb{R}}=\mathbb{R}\cup\{-\infty,+\infty\}$
+is a regularization function, and $\varepsilon\geq0$ a parameter
+which depends upon the noise variance. This can be written as the
+unconstrained problem:
+\begin{equation}
+\min_{u\in\mathbb{R}^{n}}\phi(u)+\delta_{B(\varepsilon,f)}(Au)\label{eq:unconstrained-1}
+\end{equation}
+where $\delta$ is the indicator function on the closed ball $B(\varepsilon,y)$
+of radius $\varepsilon$, centered at $y$. To limit the dynamic range
+of the solution, we add the constraint $0\leq x_{i}\leq1$ for $i\in[n]$
+\cite[4.2]{Yun-2017}. This results in the unconstrained problem:
+\begin{align}
+\min_{u\in\mathbb{R}^{n}}J(u) & :=\min_{u\in\mathbb{R}^{n}}\phi(u)+\delta_{B(\varepsilon,f)}(Au)+\delta_{[0,1]^{n}}(u)\label{eq:unconstrained-2}
+\end{align}
+
+Popular choices for the regularizer are $\phi(u)=\|u\|_{1}$, the
+$\ell_{1}$ norm, and 
+\[
+\phi(u)=TV(u)=\sum_{i=1}^{n}|u_{i}-u_{i-1}|,
+\]
+the 1-dimensional discrete total variation.
+\begin{rem}[Existence of solution]
+If $\phi$ is proper, convex and lower semi-continuous (such as TV),
+then the functional $J$ is proper, convex and lower semi-continuous
+(note that $B(\epsilon,f)$ is non-empty). $J$ is also coercive,
+because $\delta_{[0,1]^{n}}$ is coercive by boundedness of the set
+$[0,1]^{n}$. It follows that problem (\ref{eq:unconstrained-2})
+has a solution. 
+\end{rem}
+
+\begin{rem}
+Restoration algorithms also consider the unconstrained problem:
+\begin{equation}
+\min_{u\in\mathbb{R}^{n}}\frac{1}{2}\|Au-f\|_{2}^{2}+\tau\phi(u)\label{eq:alternative_problem}
+\end{equation}
+The formulation (\ref{eq:constrained-1}) has the benefit that the
+parameter $\varepsilon$ has a clear meaning, i.e. it is proportional
+to the noise standard deviation \cite[I-D]{Afonso-2011}.
+\end{rem}
+
+
+\subsection{Algorithms\label{subsec:Algorithms}}
+
+If the regularizer is convex, problem (\ref{eq:constrained-1}) is
+convex, but the very high dimensions (often $\gg10^{6})$ of $f$,
+and possibly $u$, preclude direct application of off-the-shelf optimization
+algorithms. Efficient restoration algorithms, such as those described
+in \cite{Afonso-2011}, make assumptions on the structure of $A$. 
+
+Specifically, spatially invariant blur with a periodic boundary condition
+results in a block circulant matrix. This matrix has a spectral decomposition
+$A=F^{\ast}\Lambda F$ given by the DFT matrix $F$ (which, assuming
+$n=2^{k}$, can be computed in $\mathcal{O}(n\log_{2}n)$ time, see
+\cite[4.2.1]{Hansen-2006}.) This in turn allows many matrix computions
+to be performed efficiently. 
+
+In the case of spatially variant blur (that is, the PSF changes depending
+on the location of pixels in an observed image), the matrix $A$ is
+no longer block-circulant, Toeplitz, or even symmetric. We may instead
+attempt to find an approximate solution in a $m$-dimensional subspace
+of $\mathbb{R}^{n}$, with $m\ll n$. The paper \cite{Yun-2017} uses
+this approach to construct a \emph{Krylov subspace}, and formulates
+the minimization problem inside this subspace to reduce computational
+complexity.
+
+In both papers \cite{Yun-2017,Afonso-2011}, the focus is on ADMM
+(or \emph{alternate direction method of multipliers) }to solve the
+minimization problem. ADMM is described in \cite{Boyd-2010} as ``an
+algorithm that is intended to blend the decomposability of dual ascent
+with the superior convergence properties of the method of multipliers'',
+and has a close relationship with Douglas-Rachford iterative schemes.
+In section \ref{sec:Theoretical-Properties}, we describe these methods
+in detail. 
+
+\section{Theoretical Properties\label{sec:Theoretical-Properties}}
+
+\subsection{Alternate method of multipliers\label{subsec:Alternate-method-of-multipliers}}
+
+The problem (\ref{eq:unconstrained-1}) can be seen as an unconstrained
+optimization problem of the form 
+\begin{equation}
+\min_{u\in\mathbb{R}^{n}}f_{1}(u)+f_{2}(Gu)\label{eq:split-problem-1}
+\end{equation}
+where $G\in\mathbb{R}^{d\times n}$, $f_{1}:\mathbb{R}^{n}\rightarrow\overline{\mathbb{R}}$,
+and $f_{2}:\mathbb{R}^{d}\rightarrow\overline{\mathbb{R}}$. \medskip{}
+
+\emph{Variable splitting} is a simple procedure that consists in creating
+a new variable, say $v$, to serve as the argument of $f_{2}$, under
+the constraints that $v=Gu$: \cite[II.A]{Afonso-2011}
+\begin{equation}
+\min_{u\in\mathbb{R}^{n},\,v\in\mathbb{R}^{d}}f_{1}(u)+f_{2}(v)\quad\text{subject to}\quad Gu-v=0.\label{eq:split-problem-2}
+\end{equation}
+The rationale behind variable splitting is that it may be easier to
+solve the constrained problem (\ref{eq:split-problem-2}) than to
+solve its equivalent unconstrained counterpart (\ref{eq:split-problem-1})
+We now form the \emph{augmented Lagrangian} for this problem:
+\[
+L_{\mu}(u,v,\lambda)=f_{1}(u)+f_{2}(v)+\lambda^{T}(Au-v)+\frac{\mu}{2}\|Gu-v\|_{2}^{2}
+\]
+Note that if $(u,v)$ is a feasible solution, then 
+\[
+L_{\mu}(u,v,\lambda)=f_{1}(u)+f_{2}(v).
+\]
+ADMM minimizes $L_{\mu}$ through the iterations \cite[3.1]{Boyd-2010}
+\begin{align}
+u_{k+1} & \in\argmin_{u}L_{\mu}(u,v_{k},\lambda_{k}),\nonumber \\
+v_{k+1} & \in\argmin_{v}L_{\mu}(u_{k+1},v,\lambda_{k}),\label{eq:admm-iteration}\\
+\lambda_{k+1} & \in\lambda^{k}+\mu(Au_{k+1}-v_{k+1}).\nonumber 
+\end{align}
+By setting the residual $r:=Gu-v$ and the \emph{scaled dual variable
+}$d:=-\frac{1}{\mu}\lambda$, we get
+\begin{align*}
+\lambda^{T}r+\frac{\mu}{2}\|r\|_{2}^{2} & =(\mu/2)\|r+(\mu/2)\lambda\|_{2}^{2}-(1/2\mu)\|\lambda\|_{2}^{2}\\
+ & =(\mu/2)\|r-d\|_{2}^{2}-(\mu/2)\|d\|_{2}^{2}.
+\end{align*}
+The removal of constant factors then results in the \emph{scaled formulation}
+\begin{align}
+u_{k+1}\in & \argmin_{u}f_{1}(u)+\frac{\mu}{2}\|Gu-v_{k}-d_{k}\|_{2}^{2},\nonumber \\
+v_{k+1}\in & \argmin_{v}f_{2}(v)+\frac{\mu}{2}\|Gu_{k+1}-v-d_{k}\|_{2}^{2},\label{eq:admm-scaled}\\
+d_{k+1}= & d_{k}-(Gu_{k+1}-v_{k+1}).\nonumber 
+\end{align}
+If $f_{2}$ is proper, convex and lsc, then the $v^{k}$ update uniquely
+exists, and can be written using the \emph{proximal operator}
+\[
+v_{k+1}=\prox_{f_{2}/\mu}(Gu_{k+1}-d_{k}).
+\]
+For problem (\ref{eq:unconstrained-2}), we describe the proximal
+operators in Section \ref{subsec:Proximal-operators}. Because it
+contains more than 2 summands, we generalize ADMM in Section \ref{subsec:Generalized-ADMM}
+to handle $J$ summands.
+\begin{rem}[Convergence]
+Under the assumptions that $f_{1}$ and $f_{2}$ are both closed,
+proper and convex, that $A$ has full column rank, and that both subproblems
+are solved exactly, then ADMM is shown to converge. As long as the
+sequence of errors is absolutely summable, convergence is not compromised
+\cite[Theorem 1]{Afonso-2011}. The convergence rate is $\mathcal{O}(1/k)$,
+that is, 
+\[
+L_{\mu}(u^{k})-L_{\mu}(u^{\ast})=\mathcal{O}(1/k)
+\]
+with $k$ the iteration number \cite{He-2012}. We do not know of
+a convergence result for ADMM in $m$-dimensional (Krylov) subspaces.
+\end{rem}
+
+
+\subsection{Proximal operators\label{subsec:Proximal-operators}}
+
+The proximal operator for $\delta(\cdot|S)$ is given as the projection
+on the set $S$. Therefore:
+\[
+\prox_{\delta(\cdot|B(\epsilon,f))}(s)=\begin{cases}
+f+\epsilon\frac{s-f}{\|s-f\|_{2}}, & \|s-f\|_{2}>\epsilon,\\
+s, & \|s-f\|_{2}\leq\epsilon,
+\end{cases}
+\]
+and, component-wise,
+\[
+\prox_{\delta(\cdot|[0,1]^{n}))}(s)_{i}=\begin{cases}
+0, & s_{i}\leq0,\\
+s_{i}, & 0<s_{i}<1,\\
+\beta, & s_{i}\geq1.
+\end{cases}
+\]
+The proximal operator for the 1-dimensional total variation can be
+computed with e.g. Condat's taut string algorithm \cite{Condat-2013}.
+
+\subsection{Generalized ADMM\label{subsec:Generalized-ADMM}}
+
+To approach problem (\ref{eq:unconstrained-2}), and eliminate the
+$f_{1}$ term in the $u$-update of (\ref{eq:admm-scaled}), we consider
+a generalization of problem (\ref{eq:split-problem-1}). Instead of
+two functions, we have $J$ functions, that is \cite[II.D]{Afonso-2011}
+\begin{equation}
+\min_{u\in\mathbb{R}^{d}}\sum_{j=1}^{J}g_{j}(G^{(j)}u),\label{eq:split-problem-3}
+\end{equation}
+where $g_{j}:\mathbb{R}^{p_{j}}\rightarrow\overline{\mathbb{R}}$
+are closed, proper and convex functions, $u\in\mathbb{R}^{d}$, and
+$G^{(j)}\in\mathbb{R}^{p_{j}\times d}$ are arbitrary matrices. 
+
+The minimization problem (\ref{eq:split-problem-3}) can be written
+as the problem of two summands (\ref{eq:split-problem-1}), using
+the following correspondences:
+\[
+f_{1}=0,\quad G=\begin{bmatrix}G^{(1)}\\
+\vdots\\
+G^{(J)}
+\end{bmatrix}\in\mathbb{R}^{p\times d}
+\]
+with $p=p_{1}+\cdots+p_{J}$, and $f_{2}:\mathbb{R}^{p\times d}\rightarrow\overline{\mathbb{R}}$
+given by:
+\[
+f_{2}(v)=\sum g_{j}(v^{(j)}),\quad v^{(j)}\in\mathbb{R}^{p_{j}}
+\]
+and $v=[(v^{(1)})^{T},\dots,(v^{(J)})^{T}]^{T}$. We now apply ADMM
+with
+\[
+d_{k}=\begin{bmatrix}d_{k}^{(1)}\\
+\vdots\\
+d_{k}^{(J)}
+\end{bmatrix},\quad v_{k}=\begin{bmatrix}v_{k}^{(1)}\\
+\vdots\\
+v_{k}^{(J)}
+\end{bmatrix}.
+\]
+
+Note that:
+\begin{itemize}
+\item $f_{1}=0$ turns the $u$-update in ADMM into a least-squares problem,
+which has a unique solution if $A$ has full column rank.
+\item The way of mapping problem (\ref{eq:split-problem-3}) into problem
+(\ref{eq:split-problem-1}) allows decoupling the minimization step
+in the $v$-update of ADMM into a set of $J$ independent ones. That
+is,
+\[
+v_{k+1}=\argmin_{v}f_{2}(v)+\frac{\mu}{2}\|Gu_{k+1}-d_{k}\|_{2}^{2}
+\]
+can be written as
+\begin{align*}
+\begin{bmatrix}v_{k+1}^{(1)}\\
+\vdots\\
+v_{k+1}^{(J)}
+\end{bmatrix}= & \arg\min_{v^{(1)},\dots,v^{(J)}}g_{1}(v^{(1)})+\cdots+g_{J}(v^{(J)})\\
+ & +\frac{\mu}{2}\left\Vert \begin{bmatrix}G^{(1)}\\
+\vdots\\
+G^{(J)}
+\end{bmatrix}u_{k+1}-\begin{bmatrix}v^{(1)}\\
+\vdots\\
+v^{(J)}
+\end{bmatrix}-\begin{bmatrix}d_{k}^{(1)}\\
+\vdots\\
+d_{k}^{(J)}
+\end{bmatrix}\right\Vert _{2}^{2}
+\end{align*}
+\end{itemize}
+This is summarized in Algorithm \ref{alg:ADMM-2}. 
+
+\begin{algorithm}
+Choose $\mu>0$, $v_{0}^{(1)},\dots,v_{0}^{(J)},$ and $d_{0}^{(1)},\dots,d_{0}^{(J)}$.
+
+\textbf{Repeat:}
+
+\hspace{2em}$u_{k+1}\leftarrow\argmin_{u}\|Gu-v_{k}-d_{k}\|_{2}^{2}$
+
+\hspace{2em}\textbf{For }$j=1,\dots,J$ \textbf{Do}:
+
+\hspace{2em}\hspace{2em}$v_{k+1}^{(j)}\leftarrow\prox_{g_{j}/\mu}(G^{(j)}u_{k+1}-d_{k}^{(j)})$
+
+\hspace{2em}\hspace{2em}$d_{k+1}^{(i)}\leftarrow d_{k}^{(i)}-(G^{(j)}u_{k+1}-v_{k+1}^{(j)})$
+
+\hspace{2em}\textbf{EndDo}
+
+\hspace{2em}$k\leftarrow k+1$
+
+\textbf{Until} some stopping criterion is satisfied.
+
+\caption{Generalized ADMM for problem (\ref{eq:split-problem-3}). \label{alg:ADMM-2}}
+
+\end{algorithm}
+
+
+\subsection{Krylov subspaces\label{subsec:Krylov-subspaces}}
+
+In the optimization problem (\ref{eq:unconstrained-2}), the very
+high dimension $n$ of the observed image $u$ precludes a direct
+application of ADMM, as explained in Section \ref{subsec:Algorithms}.
+We thus wish to apply optimization problems in a \emph{subspace} of
+dimensionality $m\ll n$.
+\begin{defn}[{\cite[6.2]{Saad-2003}}]
+The \textbf{Krylov subspace} of order $m$, denoted by $\mathcal{K}_{m}$,
+is the vector space spanned by $v\in\mathbb{R}^{n}$ and the first
+$m-1$ powers of $A\in\mathbb{R}^{n\times n}$:
+\[
+\mathcal{K}_{m}(A,v)=\text{span}\{v,Av,A^{2}v,\dots,A^{m-1}v\}.
+\]
+\end{defn}
+
+The Krylov subspaces form an increasing family of subspaces, with
+dimension bounded by $n$. It is the subspace of all vectors in $\mathbb{R}^{n}$
+which can be written as $x=p(A)v$, where $p$ is a polynomial of
+degree not exceeding $m-1$. In practice, constructing the Krylov
+subspaces amounts to determining their basis. The power basis $(v,Av,A^{2}v,\ldots,A^{m-1}v)$
+converges to (a multiple of) an eigenvector that corresponds to the
+largest eigenvalue of $A$, in absolute value. Therefore we construct
+an orthonormal basis $\{v_{1},v_{2},\ldots,v_{m}\}$ as follows. 
+
+\textbf{Arnoldi's method} applies Gram-Schmidt orthonormalization
+procedure to the vectors obtained by successive products of the matrix
+$A$. Algorithm \ref{alg:Arnoldi-Modified-Gram-Schmidt} \cite[6.3.2]{Saad-2003}
+gives a practical implementation, using the modified Gram-Schmidt
+procedure for improved numerical stability.  
+
+\begin{algorithm}[h]
+$r_{0}\leftarrow f-Au_{0}$
+
+$q_{1}\leftarrow r_{0}/\|r\|_{2}$
+
+\textbf{For} $i=1,2,\ldots,m$ \textbf{Do}:
+
+\hspace{2em}$v\leftarrow Aq_{i}$
+
+\hspace{2em}\textbf{For} $j=1,\cdots,i$ \textbf{Do}:
+
+\hspace{2em}\hspace{2em}$h_{j,i}\leftarrow q_{j}^{T}v$
+
+\hspace{2em}\hspace{2em}$v\leftarrow v-h_{j,i}q_{j}$
+
+\hspace{2em}\textbf{EndDo}
+
+\hspace{2em}$h_{i+1,i}\leftarrow\|v\|_{2}$. \textbf{If} $h_{i+1,i}=0$
+\textbf{Stop}
+
+\hspace{2em}$q_{i+1}\leftarrow v/h_{i+1,i}$
+
+\textbf{EndDo}
+
+\caption{Arnoldi($A,f,m,u_{0})$\label{alg:Arnoldi-Modified-Gram-Schmidt}}
+\end{algorithm}
+\medskip{}
+
+\begin{prop}[{\emph{\cite[6.5]{Saad-2003}}}]
+\emph{The following relation holds for the Arnoldi basis: 
+\begin{equation}
+AQ_{m}=Q_{m+1}H_{m},\label{eq:arnoldi-relations}
+\end{equation}
+where $Q_{m}$ denotes the $n\times m$ matrix with orthonormal column
+vectors $v_{1},\ldots,v_{m}$, and $H_{m}$ the $(m+1)\times m$ upper
+Hessenberg matrix with nonzero entries $h_{ij}$.}
+\end{prop}
+
+For a linear system $Au=f$, Krylov subspace methods extract an approximate
+solution $u_{m}$ from the affine subspace $u_{0}+\mathcal{K}_{m}(A,r_{0})$
+of dimension $m$, by imposing the condition $b-Au_{m}\bot\mathcal{L}_{m}$.
+Here, $\mathcal{L}_{m}$ is another subspace of dimension $m$, $u_{0}$
+represents an arbitrary initial guess to the solution, and $r_{0}=b-Au_{0}$
+is the initial residual. 
+
+For example, if $\mathcal{L}_{m}=A\mathcal{K}_{m}$, the method minimizes
+the $2$-norm of the residual $b-Ax$ over $x\in x_{0}+\mathcal{K}_{m}$
+\cite[Proposition 5.3]{Saad-2003}. Such a method (e.g. GMRES) can
+work with general non-symmetric matrices $A$, provided they are non-singular.
+
+We can now state the following proposition.
+\begin{prop}[{\cite[Proposition 3]{Yun-2017}}]
+\label{prop:krylov-least-squares}\emph{Under the assumption $u\in u_{0}+\mathcal{K}_{m}(A,r_{0})$,
+the least squares problem on line 3 of Algorithm \ref{alg:ADMM-2}
+is reduced to
+\begin{equation}
+\min_{\alpha\in\mathbb{R}^{m}}\left\Vert \begin{bmatrix}H_{m}\\
+\overline{G}_{2}\\
+\vdots\\
+\overline{G}_{J}
+\end{bmatrix}\alpha-\begin{bmatrix}Q_{m+1}^{T}(v_{1}+d_{1})\\
+Q_{m}^{T}(v_{2}+d_{2})\\
+\vdots\\
+Q_{m}^{T}(v_{J}+d_{J})
+\end{bmatrix}\right\Vert _{2}^{2}\label{eq:krylov-least-squares}
+\end{equation}
+where $\overline{G}_{j}:=Q_{m}^{T}G_{j}Q_{+m}\in\mathbb{R}^{m\times m}$
+for $j=2,\dots,J$. }
+\end{prop}
+
+\begin{proof}
+Follows from relation (\ref{eq:arnoldi-relations}) and orthogonality
+of $Q_{m}$.
+\end{proof}
+
+\subsection{TV restoration in Krylov subspace\label{subsec:TV-restoration}}
+
+We now combine the results of the previous sections. Consider again
+the unconstrained problem (\ref{eq:unconstrained-2}) with $\phi=TV$:
+\[
+\min_{u\in\mathbb{R}^{n}}TV(u)+\delta_{B(\varepsilon,f)}(Au)+\delta_{[0,1]^{n}}(u)
+\]
+
+Formulated in Krylov subspace $\mathcal{K}_{m}(A,f)$, with initial
+solution $u_{0}=0$ and matrix basis $Q_{m}$, the problem becomes:
+\begin{equation}
+\min_{\alpha\in\mathbb{R}^{m}}\delta_{B(\varepsilon,f)}(Q_{m+1}H_{m}\alpha)+TV(Q_{m}\alpha)+\delta_{[0,1]^{m}}(Q_{m}\alpha)\label{eq:krylov-problem}
+\end{equation}
+using the identity $AQ_{m}=Q_{m+1}H_{m}$ for the first summand. Algorithm
+\ref{alg:ADMM-2} is applied to this problem by setting
+\begin{align*}
+G^{(1)} & =Q_{m+1}H_{m},\quad G^{(2)}=G^{(3)}=Q_{m},
+\end{align*}
+and applying Proposition \ref{prop:krylov-least-squares}. $Q_{m+1}$
+and $H_{m}$ are constructed with Arnoldi (Algorithm \ref{alg:Arnoldi-Modified-Gram-Schmidt})
+from the blur matrix $A\in\mathbb{R}^{MN\times MN}$. This results
+in Algorithm \ref{alg:KADMM-TV}.
+
+\begin{algorithm}
+Choose $\mu>0$, $v_{1},\dots,v_{3}\in\mathbb{R}^{MN},$ $d_{1},\dots,d_{3}\in\mathbb{R}^{MN}$,
+$k=0$. 
+
+$Q_{m+1},H_{m}\leftarrow\text{Arnoldi}(A,f,m,0)$
+
+\textbf{Repeat:}
+
+\hspace{2em}$\alpha\leftarrow\argmin_{\alpha}\left\Vert \begin{bmatrix}H_{m}\\
+I_{m}\\
+I_{m}
+\end{bmatrix}\alpha-\begin{bmatrix}Q_{m+1}^{T}(v_{1}+d_{1})\\
+Q_{m}^{T}(v_{2}+d_{2})\\
+Q_{m}^{T}(v_{3}+d_{3})
+\end{bmatrix}\right\Vert _{2}^{2}$
+
+\hspace{2em}$v_{1}\leftarrow\prox_{\delta(\cdot|B(\epsilon,f))}(Q_{m+1}H_{m}\alpha-d_{1})$
+
+\hspace{2em}$d_{1}\leftarrow d_{k}^{(1)}-(Q_{m+1}H_{m}\alpha-v_{1})$
+
+\hspace{2em}$v_{2}\leftarrow\prox_{TV/\mu}(Q_{m}\alpha-d_{2})$
+
+\hspace{2em}$d_{2}\leftarrow d_{2}-(Q_{m}\alpha-v_{2})$
+
+\hspace{2em}$v_{3}\leftarrow\prox_{\delta(\cdot|[0,1]^{n})}(Q_{m}\alpha-d_{3})$
+
+\hspace{2em}$d_{3}\leftarrow d_{3}-(Q_{m}\alpha-v_{3})$
+
+\textbf{Until} some stopping criterion is satisfied.
+
+\caption{KADMM for TV restoration\label{alg:KADMM-TV}}
+
+\end{algorithm}
+
+
+\subsection{Complexity analysis\label{subsec:Complexity-analysis}}
+
+Let $n=MN$ be the dimension of the observed image, and $m$ the order
+of the Krylov subspace. Let $k$ be the number of iterations. We observe
+the following for Algorithm \ref{alg:KADMM-TV}:
+\begin{itemize}
+\item Constructing the Arnoldi basis via Gram-Schmidt orthogonalization
+takes $\mathcal{O}(m^{2}n)$ operations.
+\item In each iteration, a least squares problem of size $(3m+1)\times m$
+is solved, with $\mathcal{O}((3m+1)^{2}m)$ operations (using QR decomposition). 
+
+This is much smaller than the least squares problem from a direct
+application of ADMM, with size $3n\times n$ and complexity $\mathcal{O}(9n^{3})$.
+\item The product $Q_{m}\alpha$ takes $mn$ operations. In each iteration,
+the result can be stored and reused. 
+\item The product $Q_{m+1}H_{m}\alpha$ requires $\mathcal{O}(2m^{2}+2mn)$
+operations, compared to $\mathcal{O}(2mn+2n^{2})$ for the product
+$AQ_{m}\alpha$.
+\item The projection onto $B(\epsilon,f)$ and $[0,1]^{n}$ takes $\mathcal{O}(n)$
+operations.
+\item Condat's taut string algorithm has worst-case complexity $\mathcal{O}(n^{2})$,
+with $\mathcal{O}(n)$ ``in all practical situations''.
+\end{itemize}
+In short, we have $\mathcal{O}(m^{2}n)$ for the Arnoldi basis, and
+$\mathcal{O}(km^{3}+kn)$ for the ADMM iterations. Evidently, for
+$k$ sufficiently large, the complexity of ADMM dominates. For $m\ll n$,
+the algorithm then has complexity $\mathcal{O}(kn)$. For an experimental
+verification, see Table \ref{tab:Runtimes}.
+
+\begin{table}
+\begin{centering}
+{\small{}}%
+\begin{tabular}{|c|c|c|c|}
+\hline 
+{\small{}$n$} & {\small{}Elapsed time} & {\small{}$n_{\max}/n$} & {\small{}$t_{\max}/t$}\tabularnewline
+\hline 
+{\small{}1617} & {\small{}0.0807s} & {\small{}95.4861} & {\small{}95.2307}\tabularnewline
+\hline 
+{\small{}9801} & {\small{}0.5342} & {\small{}15.7536} & {\small{}14.3783}\tabularnewline
+\hline 
+{\small{}38801} & {\small{}1.9732} & {\small{}3.9793} & {\small{}3.8928}\tabularnewline
+\hline 
+{\small{}87001} & {\small{}4.9271} & {\small{}1.7747} & {\small{}1.5590}\tabularnewline
+\hline 
+{\small{}154401} & {\small{}7.6811} & {\small{}1} & {\small{}1}\tabularnewline
+\hline 
+\end{tabular}\medskip{}
+\par\end{centering}
+\caption{Runtimes ($n$) for 100 ($k$) iterations, using parameters in Section
+\ref{sec:Numerical-Methods}. The table shows the elapsed time to
+be proportional to the problem size $n$.\label{tab:Runtimes}}
+\end{table}
+
+
+\section{Numerical Experiments\label{sec:Numerical-Methods}}
+
+All methods were implemented using MATLAB on an Intel Core i5-2520
+CPU. Images from the BSDS500 data set are blurred with spatially variant
+blur (see below), with periodic boundary conditions. Gaussian noise
+is added, with noise variance $\sigma^{2}$ determined by the BSNR
+(\emph{blurred signal-to-noise ratio}), defined in \cite{Yun-2017}
+as:
+\[
+\text{BSNR}=10\log\frac{\text{var}(Au)}{\sigma^{2}}\quad\Leftrightarrow\quad\frac{\text{var}(Au)}{\exp\left(\frac{1}{10}\text{BSNR}\right)}=\sigma^{2}
+\]
+
+
+\subsection{Spatially variant Gaussian blur\label{subsec:Spatially-variant-Gaussian}}
+
+The spatially variant Gaussian blur model in \cite{Berisha-2014}
+is used for the restoration experiments. The blur kernel at the pixel
+location $s=(s_{1},s_{2})$ in the image acquisition model is obtained
+from the two-dimensional separable Gaussian function
+\begin{align*}
+p(s,t) & =\frac{1}{\xi_{1}\xi_{2}}\exp\left(-\frac{1}{2}\frac{(t_{1}-s_{1})^{2}}{\sigma_{x}^{2}(s_{1})}+\frac{(t_{2}-s_{2})^{2}}{\sigma_{y}^{2}(s_{2})}\right),
+\end{align*}
+with normalizing constants 
+\[
+\xi_{1}=\sqrt{2\pi}\sigma_{x}(s_{1}),\quad\xi_{2}=\sqrt{2\pi}\sigma_{y}(s_{2}).
+\]
+The blur kernel changes depending on the location $x$, and hence
+the blur is spatially variant.
+\begin{rem}
+$p(x,y)$ is seperable, that is, 
+\[
+p(s,t)=p_{1}(s_{1},t_{1})\,p_{2}(s_{2},t_{2})
+\]
+holds with
+\begin{align*}
+p_{1}(s_{1},t_{1}) & =\frac{1}{\xi_{1}}\exp\left\{ -\frac{1}{2}\frac{(t_{1}-s_{1})^{2}}{\sigma_{x}^{2}(s_{1})}\right\} \\
+p_{2}(s_{2},t_{2}) & =\frac{1}{\xi_{2}}\exp\left\{ -\frac{1}{2}\frac{(t_{2}-s_{2})^{2}}{\sigma_{y}^{2}(s_{2})}\right\} 
+\end{align*}
+This means we can represent the matrix $A$ as a Kroneker product
+$A_{1}\otimes A_{2}$, with $A_{1}$ and $A_{2}$ the 1-dimensional
+blur matrices \cite[4.1.1]{Hansen-2006} for a given boundary condition
+\cite[2.2.5]{Berisha-2014}.
+\end{rem}
+
+In \cite{Yun-2017}, three types of spatially variant blur are considered.
+The first type has a smaller amount of blur at the center and a larger
+amount of blur at the corners of an image. The variances are given
+by:
+\begin{align*}
+\sigma_{x}(s_{1}) & =\gamma|0.5-s_{1}/M|+0.5,\\
+\sigma_{y}(s_{2}) & =\gamma|0.5-s_{2}/N|+0.5.
+\end{align*}
+The second type is the opposite of the first case, with more severe
+blur at the center and milder blur at the corners. The variances are
+given by
+\begin{align*}
+\sigma_{x}(s_{1}) & =-\gamma|0.5-s_{1}/M|+2.5,\\
+\sigma_{y}(s_{2}) & =-\gamma|0.5-s_{2}/N|+2.5.
+\end{align*}
+The third type has smaller amount of blur at the lower right corner
+and larger amount of blur at the upper left part of an image. The
+variances are given by
+\begin{align*}
+\sigma_{x}(s_{1}) & =\gamma(0.5-s_{1}/M)/2+1.25,\\
+\sigma_{y}(s_{2}) & =\gamma(0.5-s_{2}/N)/2+1.25.
+\end{align*}
+The scalar $\gamma$ is set fixed to 4, and $21\times21$ kernel size
+is used for discretization of $p$.
+
+\subsection{Image restoration\label{subsec:Image-restoration}}
+
+For the three types of blur described in \ref{subsec:Spatially-variant-Gaussian},
+we applied KADDM to images with varying degrees of noise. To measure
+the quality of the restoration, we used the mean squared error between
+restored image $\hat{u}$ and original image $u$,
+\[
+\text{MSE}=\frac{1}{n}\sum_{i=1}^{n}(u_{i}-\hat{u}_{i}).
+\]
+Parameters for Algorithm \ref{alg:KADMM-TV} were chosen as follows.
+\begin{itemize}
+\item The initial values for $v_{i}$ and $d_{i}$ are sampled from the
+uniform distribution $U[0,1]$. 
+\item The order $m$ of the Krylov subspace is set to 16, to limit memory
+requirements.
+\item Relative change of residuals was used for the termination criterium,
+i.e. $\|r^{i}-r^{i-1}\|/\|r\|<\text{TOL},$ with a tolerance of $10^{-6}$
+and a maximum amount of iterations of 10,000.
+\item The authors in \cite{Yun-2017} suggest $\epsilon=\sqrt{\tau MN}\sigma$
+using Morozov's discrepancy principle, with $\tau=1$. Following \cite{Chuan-2014},
+we used a fixed $\tau<1$ to avoid an oversmoothed image.
+\end{itemize}
+A comparison of degraded and restored images for each blur type is
+given in Figures \ref{fig:blur-type-1}, \ref{fig:blur-type-2}, \ref{fig:blur-type-3}.
+KADMM managed to deblur the images to a certain degree, with an MSE
+of order of magnitude $10^{-3}$. Increasing the maximum iteration
+count (to 100,000) did not lead to a significant decrease in MSE,
+nor did setting $\epsilon$ to a low ($\approx$TOL) value; in the
+presence of noise, latter lead to a ``speckle pattern'' in the restored
+images.
+
+\begin{figure}
+\noindent\fbox{\begin{minipage}[t]{1\columnwidth - 2\fboxsep - 2\fboxrule}%
+\begin{center}
+\includegraphics[width=0.8\columnwidth]{02Deblurring/001_60db_corners_sv}
+\par\end{center}%
+\end{minipage}}\bigskip{}
+\noindent\fbox{\begin{minipage}[t]{1\columnwidth - 2\fboxsep - 2\fboxrule}%
+\begin{center}
+\includegraphics[width=0.8\columnwidth]{02Deblurring/001_60db_corners_sv_restored}
+\par\end{center}%
+\end{minipage}}
+
+\caption{Degraded (top) vs. restored (bottom) image after 7086 KADMM iterations
+(blur type 1).\label{fig:blur-type-1}}
+\end{figure}
+
+\begin{figure}
+\noindent\fbox{\begin{minipage}[t]{1\columnwidth - 2\fboxsep - 2\fboxrule}%
+\begin{center}
+\includegraphics[width=0.8\columnwidth]{02Deblurring/050_60db_center_sv}
+\par\end{center}%
+\end{minipage}}\bigskip{}
+\noindent\fbox{\begin{minipage}[t]{1\columnwidth - 2\fboxsep - 2\fboxrule}%
+\begin{center}
+\includegraphics[width=0.8\columnwidth]{02Deblurring/050_60db_center_sv_restored}
+\par\end{center}%
+\end{minipage}}
+
+\caption{Degraded (top) vs. restored (bottom) image after 4991 KADMM iterations
+(blur type 2).\label{fig:blur-type-2}}
+\end{figure}
+
+\begin{figure}
+\fbox{\begin{minipage}[t]{0.45\columnwidth}%
+\begin{center}
+\includegraphics[width=1\columnwidth]{02Deblurring/103_60db_gradient_sv}
+\par\end{center}%
+\end{minipage}}\hfill{}%
+\fbox{\begin{minipage}[t]{0.45\columnwidth}%
+\begin{center}
+\includegraphics[width=1\columnwidth]{02Deblurring/103_60db_gradient_sv_restored}
+\par\end{center}%
+\end{minipage}}
+
+\caption{Degraded (top) vs. restored (bottom) image after 4532 KADMM iterations
+(blur type 3).\label{fig:blur-type-3}}
+\end{figure}
+
+\begin{table}[bh]
+\begin{centering}
+{\small{}}%
+\begin{tabular}{|c|c|c|c|c|}
+\hline 
+{\small{}ID} & {\small{}Blur} & {\small{}Iterations} & {\small{}Time} & {\small{}MSE}\tabularnewline
+\hline 
+\multirow{3}{*}{{\small{}1}} & {\small{}1} & {\small{}7086} & {\small{}382.5s} & {\small{}$1.199\cdot10^{-3}$}\tabularnewline
+\cline{2-5} \cline{3-5} \cline{4-5} \cline{5-5} 
+ & {\small{}2} & {\small{}7171} & {\small{}395s} & {\small{}$5.23\cdot10^{-4}$}\tabularnewline
+\cline{2-5} \cline{3-5} \cline{4-5} \cline{5-5} 
+ & {\small{}3} & {\small{}5490} & {\small{}296s} & {\small{}$7.53\cdot10^{-4}$}\tabularnewline
+\hline 
+\multirow{3}{*}{{\small{}50}} & {\small{}1} & {\small{}5186} & {\small{}365s} & {\small{}$3.370\cdot10^{-3}$}\tabularnewline
+\cline{2-5} \cline{3-5} \cline{4-5} \cline{5-5} 
+ & {\small{}2} & {\small{}4991} & {\small{}347.5s} & {\small{}$2.594\cdot10^{-3}$}\tabularnewline
+\cline{2-5} \cline{3-5} \cline{4-5} \cline{5-5} 
+ & {\small{}3} & {\small{}3458} & {\small{}248s} & {\small{}$2.695\cdot10^{-3}$}\tabularnewline
+\hline 
+\multirow{3}{*}{{\small{}103}} & {\small{}1} & {\small{}5509} & {\small{}378s} & {\small{}$2.223\cdot10^{-3}$}\tabularnewline
+\cline{2-5} \cline{3-5} \cline{4-5} \cline{5-5} 
+ & {\small{}2} & {\small{}4895} & {\small{}326s} & {\small{}$2.492\cdot10^{-3}$}\tabularnewline
+\cline{2-5} \cline{3-5} \cline{4-5} \cline{5-5} 
+ & {\small{}3} & {\small{}4532} & {\small{}272s} & {\small{}$1.855\cdot10^{-3}$}\tabularnewline
+\hline 
+\end{tabular}\medskip{}
+\par\end{centering}
+\caption{Numerical results for images 1, 50 and 103 from BSDS500, with spatially
+variant (types 1-3) and invariant (IV) blur, and Gaussian noise (60dB
+BSNR).\label{tab:numerical-results}}
+\end{table}
+
+
+\section{Conclusion}
+
+This project presents a convex optimization framework based on ADMM
+and Krylov subspace methods. The proposed KADMM finds an inexact solution
+by restricting the solution space to a Krylov subspace of small order.
+The basis of the Krylov subspace is found by the Arnoldi process,
+and ADMM is applied in the Krylov subspace. The computational complexity
+of the algorithm is then linear in the image size and number of iterations.
+Unlike restoration methods for spatially invariant blur, which rely
+on Fourier transforms for computational efficiency, the method is
+applicable to general, non-symmetric matrices $A$.
+
+Experiments on restoration of spatially variant blurred and noised
+images show that, assuming full knowledge of the blurring operator
+and noise variance, the image can be restored to a certain degree.
+Improved results can likely be achieved with a careful hyperparameter
+study, e.g. on the regularization parameter $\mu$ for the TV proximal
+operator \cite{Deledalle-2012}.
+\begin{thebibliography}{10}
+\bibitem{Yun-2017}J.D. Yun, S. Yang. \emph{ADMM in Krylov Subspace
+and Its Application to Total Variation Restoration of Spatially Variant
+Blur}, SIAM J. Imaging Sciences, Vol. 10, No. 2, pp. 484-507, 2017.
+
+\bibitem{Afonso-2011}M.V. Afonso, J.M. Bioucas-Dias, M. A. T. Figueiredo.
+\emph{An Augmented Lagrangian Approach to the Constrainted Optimization
+Formulation of Imaging Inverse Problems}, IEEE Transactions on Image
+Processing, Vol. 20, No. 3, March 2011.
+
+\bibitem{Boyd-2010}S. Boyd, N. Parikh, E. Chu, B. Peleato, J. Eckstein.
+\emph{Distributed Optimization and Statistical Learning via the Alternating
+Direction Method of Multipliers}, Foundations and Trends in Machine
+Learning, Vol. 3, No. 1, 2010.
+
+\bibitem{Hansen-2006}P. C. Hansen, J. G. Nagy, D. P. O'Leary. \emph{Deblurring
+Images \textendash{} Matrices, Spectra and Filtering}, SIAM, 2006.
+
+\bibitem{Nagy-1998}J. G. Nagy, D. P. O'Leary. \emph{Restoring images
+degraded by spatially variant blur}, SIAM J. Sci. Comput., Vol. 19,
+No. 4, pp. 1063-1082, July 1998.
+
+\bibitem{Saad-2003}Y. Saad. \emph{Iterative Methods for Sparse Linear
+Systems}, SIAM, 2003.
+
+\bibitem{Stuurman-2012}N. Stuurman. \emph{Measuring a Point Spread
+Function}, iBiology, 2012. \url{https://www.ibiology.org/talks/measuring-a-point-spread-function/}
+
+\bibitem{Almeida-2010}M.S.C. Almeida, L.B. Almeida. \emph{Blind and
+Semi-Blind Deblurring of Natural Images}, IEEE Transactions on Image
+Processing, Vol. 19, No. 1, January 2010.
+
+\bibitem{Calvetti-2005}D. Calvetti, E. Somersalo. \emph{Bayesian
+image deblurring and boundary effects}, Advanced Signal Processing
+Algorithms, Architectures and Implementations, 2005.
+
+\bibitem{Condat-2013}L. Condat. \emph{A Direct Algorithm for 1D Total
+Variation Denoising}, IEEE Signal Proc. Letters, Vol. 20, No. 11,
+pp. 1054-1057, 2013.
+
+\bibitem{He-2012}B. He, X. Yuan. \emph{On the $O(1/n)$ convergence
+rate of the Douglas-Rachford alternating direction method}, SIAM J.
+Numer. Anal., Vol. 50, No. 2, pp. 700-709, 2012.
+
+\bibitem{Berisha-2014}S. Berisha, J.G. Nagy. \emph{Iterative methods
+for image restoration}, Academic Press Library in Signal Processing,
+Volume 4, pp. 193-247, 2014.
+
+\bibitem{Chuan-2014}H. Chuan, H. Chuang-Hua, Z. Wei, S. Biao. \emph{Box-constrained
+Total-variation Image Restoration with Automatic Parameter Estimation},
+Acta Automatica Sinica, Vol. 40 No.8, August 2014.
+
+\bibitem{Deledalle-2012}C. Deledalle, S. Vaiter, G. Peyré, J.M. Fadili,
+C. Dossal. \emph{Unbiased Risk Estimation for Sparse Analysis Regularization},
+Proc. ICIP\textquoteright 12, Sep 2012.
+\end{thebibliography}
+
+\end{document}

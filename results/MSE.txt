@@ -1,0 +1,19 @@
+001, corners
+MSE: 0.001199, radius: 3.032105, iterations: 7086, time: 382.497513
+001, center
+MSE: 0.000523, radius: 3.083005, iterations: 7171, time: 395.062627
+001, gradient
+MSE: 0.000753, radius: 3.441361, iterations: 5490, time: 295.664277
+050, corners
+MSE: 0.003370, radius: 2.310232, iterations: 5186, time: 364.591786
+050, center
+MSE: 0.002594, radius: 2.298649, iterations: 4991, time: 367.526595
+050, gradient
+MSE: 0.002695, radius: 3.069463, iterations: 3458, time: 248.101986
+103, corners
+MSE: 0.002223, radius: 3.954850, iterations: 5509, time: 377.900269
+103, center
+MSE: 0.002492, radius: 3.921690, iterations: 4895, time: 326.072570
+103, gradient
+MSE: 0.001855, radius: 4.237489, iterations: 4532, time: 272.059547
+
